@@ -16,6 +16,13 @@ import requests
 ENDPOINT = os.environ.get("PANGRAM_ENDPOINT", "https://text.api.pangram.com/")
 
 
+def _first_present(data: dict, keys: tuple[str, ...]):
+    for key in keys:
+        if key in data and data[key] is not None:
+            return data[key]
+    return None
+
+
 def score_text(text: str, max_retries: int = 4) -> dict:
     """Return a normalized dict: {ai_likelihood: float, raw: <full response>}."""
     key = os.environ["PANGRAM_API_KEY"]
@@ -30,11 +37,12 @@ def score_text(text: str, max_retries: int = 4) -> dict:
             r.raise_for_status()
             data = r.json()
             # Adjust these keys to match Pangram's live schema:
-            likelihood = (
-                data.get("ai_likelihood")
-                or data.get("likelihood_ai")
-                or data.get("score")
+            likelihood = _first_present(
+                data,
+                ("ai_likelihood", "likelihood_ai", "score"),
             )
+            if likelihood is not None:
+                likelihood = float(likelihood)
             return {"ai_likelihood": likelihood, "raw": data}
         except requests.RequestException:
             if attempt == max_retries - 1:

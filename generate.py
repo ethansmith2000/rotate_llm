@@ -8,7 +8,7 @@ handoff density and with specific models.
 
 from __future__ import annotations
 import random
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 
 from adapters import Adapter
 from boundaries import Boundary, ref_token_len
@@ -20,6 +20,7 @@ class Span:
     start: int
     end: int
     text: str
+    boundary_n: int
 
 
 @dataclass
@@ -35,7 +36,11 @@ class Document:
 
     @property
     def n_handoffs(self) -> int:
-        return max(0, len(self.spans) - 1)
+        return sum(
+            1
+            for prev, cur in zip(self.spans, self.spans[1:])
+            if prev.model != cur.model
+        )
 
     def to_row(self) -> dict:
         return {
@@ -50,10 +55,24 @@ class Document:
         }
 
 
-def _next_model(roster: list[Adapter], i: int, order: str) -> Adapter:
+def _next_model(
+    roster: list[Adapter],
+    i: int,
+    order: str,
+    previous: Adapter | None = None,
+) -> Adapter:
     if order == "round_robin":
         return roster[i % len(roster)]
-    return random.choice(roster)  # "random"
+    if order == "random":
+        choices = [a for a in roster if a is not previous]
+        return random.choice(choices or roster)
+    raise ValueError(f"unknown model order {order!r}")
+
+
+def _request_budget(boundary: Boundary, boundary_n: int, remaining_ref_tokens: int) -> int:
+    if boundary.mode in ("fixed_tokens", "jitter_tokens"):
+        return max(1, min(boundary_n + 4, remaining_ref_tokens + 4))
+    return max(1, min(boundary_n + 4, remaining_ref_tokens + 32))
 
 
 def generate(
@@ -67,17 +86,28 @@ def generate(
     text = ""
     spans: list[Span] = []
     turn = 0
+    previous_model: Adapter | None = None
     while ref_token_len(text) < target_ref_tokens and turn < max_turns:
-        model = _next_model(roster, turn, order)
-        cont = model.continue_text(prompt, text, max_new_tokens=boundary.draw() + 4)
-        kept = boundary.keep(cont).strip()
+        remaining = max(1, target_ref_tokens - ref_token_len(text))
+        boundary_n = boundary.draw()
+        if boundary.mode in ("fixed_tokens", "jitter_tokens"):
+            boundary_n = min(boundary_n, remaining)
+
+        model = _next_model(roster, turn, order, previous_model)
+        cont = model.continue_text(
+            prompt,
+            text,
+            max_new_tokens=_request_budget(boundary, boundary_n, remaining),
+        )
+        kept = boundary.keep(cont, boundary_n).strip()
         if not kept:
             turn += 1
             continue
         sep = "" if (not text or text.endswith(("\n", " "))) else " "
         start = len(text) + len(sep)
         text = text + sep + kept
-        spans.append(Span(model.name, start, len(text), kept))
+        spans.append(Span(model.name, start, len(text), kept, boundary_n))
+        previous_model = model
         turn += 1
 
     return Document(

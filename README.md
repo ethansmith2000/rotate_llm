@@ -30,7 +30,7 @@ correlate detection with handoff density and with specific models.
 ## Setup (in YOUR environment — this needs network + keys)
 
 ```bash
-pip install openai anthropic google-genai tiktoken requests pandas
+pip install openai anthropic google-genai tiktoken requests
 export OPENAI_API_KEY=...      # for gpt models
 export ANTHROPIC_API_KEY=...   # for claude models
 export GOOGLE_API_KEY=...      # for gemini
@@ -51,8 +51,14 @@ have access to, confirm `score.py` matches Pangram's current response schema
 (the key names there are best-guess defaults — check their live docs), and:
 
 ```bash
+python run_experiment.py --smoke
 python run_experiment.py
 ```
+
+The smoke run writes to `results_smoke/` by default and uses one prompt, 80
+reference tokens, the first two roster entries, one small rotation condition, and
+their baselines. Use it to catch provider, credential, and scoring-schema issues
+before running the full sweep.
 
 Outputs: `results/results.csv` (one row per doc), `results/summary.csv` (mean AI
 likelihood per condition, sorted), and per-doc provenance JSON.

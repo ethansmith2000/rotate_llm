@@ -12,15 +12,17 @@ result you're predicting.
 
 Run in YOUR environment (needs network + keys). Usage:
     python run_experiment.py
+    python run_experiment.py --smoke
 Edit PROMPTS and the SWEEP below to taste.
 """
 
 from __future__ import annotations
+import argparse
+import csv
 import json
 import dataclasses
+import statistics
 from pathlib import Path
-
-import pandas as pd
 
 from adapters import DEFAULT_ROSTER, Adapter
 from boundaries import Boundary
@@ -34,10 +36,71 @@ PROMPTS = [
     "Write a ~350-word piece on the tradeoffs of remote work for junior employees.",
 ]
 
+
+def _write_results_csv(rows: list[dict], path: Path):
+    if not rows:
+        return
+    fields = list(rows[0].keys())
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _summary_rows(rows: list[dict]) -> list[dict]:
+    by_condition: dict[str, list[float]] = {}
+    for row in rows:
+        ai = row.get("ai_likelihood")
+        if ai is None:
+            continue
+        by_condition.setdefault(row["condition"], []).append(float(ai))
+
+    summary = []
+    for condition, values in by_condition.items():
+        summary.append({
+            "condition": condition,
+            "mean": statistics.mean(values),
+            "std": statistics.stdev(values) if len(values) > 1 else None,
+            "count": len(values),
+        })
+    return sorted(summary, key=lambda row: row["mean"])
+
+
+def _write_summary_csv(summary: list[dict], path: Path):
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["condition", "mean", "std", "count"])
+        writer.writeheader()
+        writer.writerows(summary)
+
+
+def _print_summary(summary: list[dict]):
+    print("\n=== mean AI likelihood by condition (low = evaded more) ===")
+    if not summary:
+        print("(no successful scores)")
+        return
+    print(f"{'condition':32s} {'mean':>10s} {'std':>10s} {'count':>5s}")
+    for row in summary:
+        std = "" if row["std"] is None else f"{row['std']:.6f}"
+        print(f"{row['condition']:32s} {row['mean']:10.6f} {std:>10s} {row['count']:5d}")
+
+
 # (label, boundary, roster, order). Single-model baselines use a 1-model roster
-# and a huge interval so no rotation ever fires.
-def build_sweep():
+# and one document-sized token boundary so no rotation fires.
+def build_sweep(target_ref_tokens=400, smoke=False):
     full = DEFAULT_ROSTER
+    if smoke:
+        smoke_roster = full[:2] if len(full) > 1 else full
+        return [
+            ("smoke_rotate_words_6",
+             Boundary("fixed_words", 6, 6), smoke_roster, "round_robin"),
+            *[
+                (f"smoke_baseline_{a.name}",
+                 Boundary("fixed_tokens", target_ref_tokens, target_ref_tokens),
+                 [a], "round_robin")
+                for a in smoke_roster
+            ],
+        ]
+
     sweep = []
 
     # --- rotation conditions ---
@@ -59,12 +122,21 @@ def build_sweep():
     # --- single-model baselines (controls) ---
     for a in full:
         sweep.append((f"baseline_{a.name}",
-                      Boundary("fixed_words", 10_000, 10_000), [a], "round_robin"))
+                      Boundary("fixed_tokens", target_ref_tokens, target_ref_tokens),
+                      [a], "round_robin"))
 
     return sweep
 
 
-def main(out_dir="results", target_ref_tokens=400, reps=2):
+def main(out_dir="results", target_ref_tokens=400, reps=2, smoke=False):
+    prompts = PROMPTS
+    if smoke:
+        prompts = PROMPTS[:1]
+        target_ref_tokens = min(target_ref_tokens, 80)
+        reps = 1
+        if out_dir == "results":
+            out_dir = "results_smoke"
+
     out = Path(out_dir)
     out.mkdir(exist_ok=True)
     prov_dir = out / "provenance"
@@ -72,8 +144,8 @@ def main(out_dir="results", target_ref_tokens=400, reps=2):
 
     rows = []
     doc_id = 0
-    for label, boundary, roster, order in build_sweep():
-        for prompt in PROMPTS:
+    for label, boundary, roster, order in build_sweep(target_ref_tokens, smoke=smoke):
+        for prompt in prompts:
             for rep in range(reps):
                 doc = generate(prompt, roster, boundary,
                                target_ref_tokens=target_ref_tokens, order=order)
@@ -96,18 +168,24 @@ def main(out_dir="results", target_ref_tokens=400, reps=2):
                 doc_id += 1
                 print(f"[{doc_id}] {label:28s} ai={ai}")
 
-    df = pd.DataFrame(rows)
-    df.to_csv(out / "results.csv", index=False)
-
-    # quick summary: mean AI likelihood per condition
-    summary = (df.dropna(subset=["ai_likelihood"])
-                 .groupby("condition")["ai_likelihood"]
-                 .agg(["mean", "std", "count"])
-                 .sort_values("mean"))
-    summary.to_csv(out / "summary.csv")
-    print("\n=== mean AI likelihood by condition (low = evaded more) ===")
-    print(summary.to_string())
+    _write_results_csv(rows, out / "results.csv")
+    summary = _summary_rows(rows)
+    _write_summary_csv(summary, out / "summary.csv")
+    _print_summary(summary)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run the rotation experiment.")
+    parser.add_argument("--out-dir", default="results",
+                        help="Directory for CSVs and provenance JSON.")
+    parser.add_argument("--target-ref-tokens", type=int, default=400,
+                        help="Target document length in reference tokens.")
+    parser.add_argument("--reps", type=int, default=2,
+                        help="Repetitions per condition/prompt.")
+    parser.add_argument("--smoke", action="store_true",
+                        help="Run one cheap prompt/condition pass before a full sweep.")
+    args = parser.parse_args()
+    main(out_dir=args.out_dir,
+         target_ref_tokens=args.target_ref_tokens,
+         reps=args.reps,
+         smoke=args.smoke)

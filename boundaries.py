@@ -73,8 +73,8 @@ class Boundary:
     def draw(self) -> int:
         return self.lo if self.lo >= self.hi else random.randint(self.lo, self.hi)
 
-    def keep(self, continuation: str) -> str:
-        k = self.draw()
+    def keep(self, continuation: str, k: int | None = None) -> str:
+        k = self.draw() if k is None else k
         if self.mode in ("fixed_words", "jitter_words"):
             return _word_prefix(continuation, k)
         if self.mode in ("fixed_tokens", "jitter_tokens"):
