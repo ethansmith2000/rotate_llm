@@ -37,7 +37,14 @@ export GOOGLE_API_KEY=...      # for gemini
 export PANGRAM_API_KEY=...     # scoring
 # optional open models via any OpenAI-compatible server:
 # export OPEN_BASE_URL=http://localhost:8000/v1 ; export OPEN_API_KEY=...
+# or Fireworks:
+# export OPEN_BASE_URL=https://api.fireworks.ai/inference/v1
+# export OPEN_API_KEY=$FIREWORKS_API_KEY
 ```
+
+`keys.example.py` lists the expected local secrets with placeholder values. If
+you want a local checklist, copy it to `keys.py` and fill in real values there;
+`keys.py` is ignored by git and should never be committed.
 
 Then edit `adapters.py` `DEFAULT_ROSTER` to match the exact models/versions you
 have access to, confirm `score.py` matches Pangram's current response schema
