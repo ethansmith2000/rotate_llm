@@ -30,7 +30,8 @@ correlate detection with handoff density and with specific models.
 ## Setup (in YOUR environment — this needs network + keys)
 
 ```bash
-pip install openai anthropic google-genai tiktoken requests
+make setup
+source .venv/bin/activate
 export OPENAI_API_KEY=...      # for gpt models
 export ANTHROPIC_API_KEY=...   # for claude models
 export GOOGLE_API_KEY=...      # for gemini
@@ -42,17 +43,37 @@ export PANGRAM_API_KEY=...     # scoring
 # export OPEN_API_KEY=$FIREWORKS_API_KEY
 ```
 
+If you prefer not to use `make`, the setup commands are:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
 `keys.example.py` lists the expected local secrets with placeholder values. If
 you want a local checklist, copy it to `keys.py` and fill in real values there;
-`keys.py` is ignored by git and should never be committed.
+`keys.py` is ignored by git, loaded automatically at startup, and should never be
+committed. Exporting the same names in your shell also works.
 
 Then edit `adapters.py` `DEFAULT_ROSTER` to match the exact models/versions you
-have access to, confirm `score.py` matches Pangram's current response schema
+have access to. The runner skips providers whose keys are missing, so it is fine
+to run with only OpenAI configured, only Fireworks configured, or any subset of
+the roster. Also confirm `score.py` matches Pangram's current response schema
 (the key names there are best-guess defaults — check their live docs), and:
 
 ```bash
-python run_experiment.py --smoke
-python run_experiment.py
+make smoke
+make run
+```
+
+Runs default to a 500-word cap. Override it with `--max-words N` when calling
+`run_experiment.py` directly, use `--max-words 0` to disable the cap, or pass a
+different Make value:
+
+```bash
+make run MAX_WORDS=500
 ```
 
 The smoke run writes to `results_smoke/` by default and uses one prompt, 80

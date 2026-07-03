@@ -55,6 +55,14 @@ def _word_prefix(text: str, n: int) -> str:
     return "".join(out)
 
 
+def word_prefix(text: str, n: int) -> str:
+    return _word_prefix(text, n)
+
+
+def word_len(text: str) -> int:
+    return len(re.findall(r"\S+", text))
+
+
 def _sentence_prefix(text: str, n: int) -> str:
     pieces = _SENT_SPLIT.split(text)
     if len(pieces) <= n:

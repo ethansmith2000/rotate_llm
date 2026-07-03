@@ -11,7 +11,7 @@ import random
 from dataclasses import dataclass, field
 
 from adapters import Adapter
-from boundaries import Boundary, ref_token_len
+from boundaries import Boundary, ref_token_len, word_len, word_prefix
 
 
 @dataclass
@@ -33,6 +33,7 @@ class Document:
     boundary_hi: int = 0
     roster: list[str] = field(default_factory=list)
     target_ref_tokens: int = 0
+    max_words: int | None = None
 
     @property
     def n_handoffs(self) -> int:
@@ -51,6 +52,8 @@ class Document:
             "roster": ",".join(self.roster),
             "n_handoffs": self.n_handoffs,
             "ref_tokens": ref_token_len(self.text),
+            "words": word_len(self.text),
+            "max_words": self.max_words,
             "text": self.text,
         }
 
@@ -82,13 +85,21 @@ def generate(
     target_ref_tokens: int = 400,
     order: str = "round_robin",  # or "random"
     max_turns: int = 200,
+    max_words: int | None = 500,
 ) -> Document:
     text = ""
     spans: list[Span] = []
     turn = 0
     previous_model: Adapter | None = None
     while ref_token_len(text) < target_ref_tokens and turn < max_turns:
+        if max_words is not None and word_len(text) >= max_words:
+            break
+
         remaining = max(1, target_ref_tokens - ref_token_len(text))
+        remaining_words = None
+        if max_words is not None:
+            remaining_words = max_words - word_len(text)
+
         boundary_n = boundary.draw()
         if boundary.mode in ("fixed_tokens", "jitter_tokens"):
             boundary_n = min(boundary_n, remaining)
@@ -100,6 +111,8 @@ def generate(
             max_new_tokens=_request_budget(boundary, boundary_n, remaining),
         )
         kept = boundary.keep(cont, boundary_n).strip()
+        if remaining_words is not None:
+            kept = word_prefix(kept, remaining_words).strip()
         if not kept:
             turn += 1
             continue
@@ -119,4 +132,5 @@ def generate(
         boundary_hi=boundary.hi,
         roster=[a.name for a in roster],
         target_ref_tokens=target_ref_tokens,
+        max_words=max_words,
     )

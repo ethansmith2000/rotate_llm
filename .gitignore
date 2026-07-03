@@ -1,5 +1,7 @@
 keys.py
 .env
+.venv/
 __pycache__/
 *.py[cod]
 results/
+results_smoke/
